@@ -3,25 +3,27 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <ctype.h>
 
 #define SERVER_PORT_1 15113
 #define SERVER_PORT_2 25113
 #define MAX_MSG 100
 
-int main(int argc, char const* argv[]) {
-    int client_fd_1, client_fd_2;
+// Function to convert a string to lowercase
+void toLowercase(char *str) {
+    for (int i = 0; str[i]; i++) {
+        str[i] = tolower(str[i]);
+    }
+}
+
+int main(int argc, char const *argv[]) {
+    int client_fd;
     struct sockaddr_in serv_addr_1, serv_addr_2;
 
     // create socket
-    client_fd_1 = socket(AF_INET, SOCK_STREAM, 0);
-    if (client_fd_1 < 0) {
-        printf("Error: socket SERVER 1 failed");
-        return 1;
-    }
-
-    client_fd_2 = socket(AF_INET, SOCK_STREAM, 0);
-    if (client_fd_2 < 0) {
-        printf("Error: socket SERVER 2 failed");
+    client_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (client_fd < 0) {
+        printf("Error: socket creation failed\n");
         return 1;
     }
 
@@ -29,25 +31,26 @@ int main(int argc, char const* argv[]) {
     serv_addr_1.sin_family = AF_INET;
     serv_addr_1.sin_port = htons(SERVER_PORT_1);
     if (inet_pton(AF_INET, "127.0.0.1", &serv_addr_1.sin_addr) <= 0) {
-        printf("Error: invalid address");
+        printf("Error: invalid address\n");
         return 1;
     }
 
     serv_addr_2.sin_family = AF_INET;
     serv_addr_2.sin_port = htons(SERVER_PORT_2);
     if (inet_pton(AF_INET, "127.0.0.1", &serv_addr_2.sin_addr) <= 0) {
-        printf("Error: invalid address");
+        printf("Error: invalid address\n");
         return 1;
     }
 
-    // connect socket to SERVER_PORT_1
-    if (connect(client_fd_1, (struct sockaddr *) &serv_addr_1, sizeof(serv_addr_1)) < 0) {
+    // Attempt to connect to SERVER_PORT_1
+    if (connect(client_fd, (struct sockaddr *)&serv_addr_1, sizeof(serv_addr_1)) < 0) {
         printf("Error: connection to SERVER_PORT_1 failed\n");
         printf("Attempting to connect to SERVER_PORT_2...\n");
 
-        // connect socket to SERVER_PORT_2
-        if (connect(client_fd_2, (struct sockaddr *) &serv_addr_2, sizeof(serv_addr_2)) < 0) {
+        // Attempt to connect to SERVER_PORT_2
+        if (connect(client_fd, (struct sockaddr *)&serv_addr_2, sizeof(serv_addr_2)) < 0) {
             printf("Error: connection to SERVER_PORT_2 failed\n");
+            close(client_fd);
             return 1;
         } else {
             printf("Connected to SERVER_PORT_2.\n");
@@ -56,36 +59,81 @@ int main(int argc, char const* argv[]) {
         printf("Connected to SERVER_PORT_1.\n");
     }
 
+    while (1) {
+        // prompt user to input the day
+        printf("Enter luck ('man' to see the manual, 'chi' to get a random number): ");
+        char input[MAX_MSG];
+        fgets(input, MAX_MSG, stdin);
+        // remove trailing newline character
+        input[strcspn(input, "\n")] = '\0';
 
-    // prompt user to input the day
-    printf("Enter the day (e.g., Monday, Tuesday, etc.): ");
-    char day_input[MAX_MSG];
-    fgets(day_input, MAX_MSG, stdin);
-    // remove trailing newline character
-    day_input[strcspn(day_input, "\n")] = '\0';
+        // Convert the input to lowercase for case-insensitive comparison
+        char lower_input[MAX_MSG];
+        strcpy(lower_input, input);
+        toLowercase(lower_input);
 
-    // send the input day to the server via SERVER_PORT_1
-    send(client_fd_1, day_input, strlen(day_input), 0);
+        if (strcmp(lower_input, "man") == 0) {
+            // Send "man" command to the server
+            send(client_fd, "man", strlen("man"), 0);
 
-    // Receive the response from the server
-    char rcv_msg[MAX_MSG * 10];
-    recv(client_fd_1, rcv_msg, sizeof(rcv_msg), 0);
+            // Receive and print the manual from the server
+            char manual[MAX_MSG * 10] = {0}; // Initialize the receive buffer for manual
+            int bytes_received = recv(client_fd, manual, sizeof(manual), 0);
+            if (bytes_received < 0) {
+                printf("Error: recv failed\n");
+                break;
+            } else if (bytes_received == 0) {
+                printf("Server closed the connection\n");
+                break;
+            }
+            printf("%s\n", manual); // Print the manual
+            continue;
+        }
 
-    // Check if the received message indicates a wrong input
-    if (strcmp(rcv_msg, "Wrong input!, please try again") == 0) {
-        printf("Error: Wrong input received from the server.\n");
-        // You can take further action here, such as requesting input again from the user
-    } else {
-        // Print the received response in table format
-        printf("__________________________________________________\n");
-        printf("|     Day     |      Color      |       Work      |\n");
-        printf("---------------------------------------------------\n");
-        printf("%s", rcv_msg);
-        printf("---------------------------------------------------\n");
+        if (strcmp(lower_input, "bye") == 0) {
+            break; // Exit the loop to terminate the connection
+        }
+
+        // send the input to the server
+        if (send(client_fd, input, strlen(input), 0) < 0) {
+            printf("Error: send failed\n");
+            break;
+        }
+
+        // Receive the response from the server
+        char rcv_msg[MAX_MSG * 10] = {0}; // Initialize the receive buffer
+        int bytes_received = recv(client_fd, rcv_msg, sizeof(rcv_msg), 0);
+        if (bytes_received < 0) {
+            printf("Error: recv failed\n");
+            break;
+        } else if (bytes_received == 0) {
+            printf("Server closed the connection\n");
+            break;
+        }
+
+        // Check if the received message indicates a wrong input
+        if (strcmp(rcv_msg, "Wrong input!, please try again") == 0) {
+            printf("Error: Wrong input received from the server.\n");
+        } else {
+            if (strcmp(lower_input, "chi") == 0) {
+                printf("Chi-chi stick: \n");
+                printf("------\n");
+                printf("%s", rcv_msg);
+                printf("------\n");
+            } else {
+                // Print the received response in table format
+                printf("---------------------------------------------------\n");
+                printf("|     Day     |      Color      |       Work      |\n");
+                printf("---------------------------------------------------\n");
+                printf("%s", rcv_msg);
+                printf("---------------------------------------------------\n");
+            }
+        }
     }
-    // close sockets
-    close(client_fd_1);
-    close(client_fd_2);
+
+    // Inform the server about the "bye" message and close socket
+    send(client_fd, "bye", strlen("bye"), 0);
+    close(client_fd);
 
     return 0;
 }
