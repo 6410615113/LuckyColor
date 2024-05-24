@@ -15,15 +15,16 @@
 #define MAX_CHI_LINE_LENGTH 500
 
 char *days[7] = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};
-char colors[7][6][50]; // 7 days, 7 columns, 50 characters max per color entry
+char colors[7][6][50]; // 7 days, 6 columns, 50 characters max per color 
 
-// Structure to hold Chi-chi stick lines
+// Structure of Chi-chi stick lines
 typedef struct {
     int number;
     char text[MAX_MSG];
 } ChiLine;
 
-char *abbreviations[][2] = {
+// Map short day with full day
+char *shortday[][2] = {
     {"mon", "Monday"},
     {"tue", "Tuesday"},
     {"wed", "Wednesday"},
@@ -35,22 +36,22 @@ char *abbreviations[][2] = {
     {"tmr", "tomorrow"},
     {"td", "today"}};
 
-// Function to convert a string to lowercase
+// Function for convert to lowercase
 void toLowercase(char *str) {
     for (int i = 0; str[i]; i++) {
         str[i] = tolower(str[i]);
     }
 }
 
-// Function to map abbreviation or day name variations to full name
-const char *mapAbbreviation(char *input) {
+// Function to map short day to full name
+const char *mapShortday(char *input) {
     // Convert the input to lowercase for case-insensitive comparison
     toLowercase(input);
 
-    // Check if the input matches any abbreviation or day name variation
-    for (int i = 0; i < sizeof(abbreviations) / sizeof(abbreviations[0]); ++i) {
-        if (strcmp(input, abbreviations[i][0]) == 0 || strcmp(input, abbreviations[i][1]) == 0) {
-            return abbreviations[i][1]; // Return the full day name
+    // Check if the input matches short day
+    for (int i = 0; i < sizeof(shortday) / sizeof(shortday[0]); ++i) {
+        if (strcmp(input, shortday[i][0]) == 0 || strcmp(input, shortday[i][1]) == 0) {
+            return shortday[i][1]; // Return the full day name
         }
     }
 
@@ -79,11 +80,11 @@ int getCurrentDayIndex() {
     time_t rawtime;
     struct tm *tm_info;
     setenv("TZ", "Asia/Bangkok", 1); // Set the timezone to GMT+7 (Bangkok, Thailand)
-    tzset();                          // Update the timezone
+    tzset();                         // Update the timezone
     time(&rawtime);
     tm_info = localtime(&rawtime); // Fetch local time in GMT+7
-    int dayIndex = tm_info->tm_wday; // Sunday is 0, Monday is 1, ..., Saturday is 6
-    // Adjust for timezone offset
+    int dayIndex = tm_info->tm_wday;
+    // Adjust for timezone
     dayIndex = (dayIndex + GMT_OFFSET) % 7;
     return dayIndex;
 }
@@ -99,7 +100,7 @@ void readColorData() {
     char line[256];
     int row = 0;
 
-    // Skip the header line
+    // Noted: Skip the header line
     fgets(line, sizeof(line), file);
 
     while (fgets(line, sizeof(line), file) && row < 7) {
@@ -107,13 +108,12 @@ void readColorData() {
         int col = 0;
         while (token && col < 6) {
             strncpy(colors[row][col], token, 49);
-            colors[row][col][49] = '\0'; // Ensure null-termination
+            colors[row][col][49] = '\0'; // Check null
             token = strtok(NULL, ",");
             col++;
         }
         row++;
     }
-
     fclose(file);
 }
 
@@ -132,14 +132,13 @@ void readChiData(ChiLine chi_lines[MAX_CHI_LINES]) {
         chi_lines[line_number].number = line_number + 1; // Chi-chi stick numbers start from 1
         line_number++;
     }
-
     fclose(file);
 }
 
-// Function to match random number with Chi-chi stick line and return the text
+// Function to match random number with Chi-chi line and return the text
 char *getChiText(int random_number) {
     // Read Chi-chi stick lines from "chi.csv"
-    static ChiLine chi_lines[MAX_CHI_LINES]; // static to keep data between function calls
+    static ChiLine chi_lines[MAX_CHI_LINES];
     static int data_loaded = 0;
 
     if (!data_loaded) {
@@ -156,18 +155,18 @@ char *getChiText(int random_number) {
     return chi_lines[random_number - 1].text;
 }
 
-// Thread function to generate a random number between 1 and 30 and send it to the client
+// Create thread to use function to generate a random number between 1 and 30 and send it to the client
 void *getRandomNumber(void *arg) {
     int client_socket = *(int *)arg;
     char response[MAX_MSG] = {0};
 
-    // Generate a random number between 1 and 30
+    // Generate a random number between 1-30
     int random_number = (rand() % 30) + 1;
 
-    // Get the corresponding chi text
+    // Get chi text line same as random number
     char *chi_text = getChiText(random_number);
 
-    // Format the response: random_number|chi_text
+    // Send response: random_number|chi_text
     snprintf(response, sizeof(response), "%02d|%s", random_number, chi_text);
 
     // Send the response to the client
@@ -179,26 +178,25 @@ void *getRandomNumber(void *arg) {
 // Thread function to handle client requests
 void *clientHandler(void *arg) {
     int client_socket = *((int *)arg);
-    free(arg); // Free the allocated memory for client socket
+    free(arg); // Free allocate memory for client socket
 
     while (1) {
-        char rcv_day[MAX_MSG] = {0};
-        int bytes_read = read(client_socket, rcv_day, MAX_MSG);
+        char rcv_msg[MAX_MSG] = {0};
+        int bytes_read = read(client_socket, rcv_msg, MAX_MSG);
         if (bytes_read <= 0) {
             printf("Client disconnected or error occurred\n");
             break;
         }
 
-        // Remove trailing newline character if any
-        rcv_day[strcspn(rcv_day, "\n")] = '\0';
+        rcv_msg[strcspn(rcv_msg, "\n")] = '\0';
 
-        printf("Received day from client: %s\n", rcv_day);
+        printf("Received day from client: %s\n", rcv_msg);
 
         // Convert the received day to lowercase for case-insensitive comparison
-        toLowercase(rcv_day);
+        toLowercase(rcv_msg);
 
-        // Map abbreviation to full name
-        const char *full_day = mapAbbreviation(rcv_day);
+        // Map short day to full name
+        const char *full_day = mapShortday(rcv_msg);
 
         if (strcmp(full_day, "bye") == 0) {
             printf("Client sent 'bye'. Closing connection.\n");
